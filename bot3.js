@@ -31,8 +31,7 @@ const balances = {
   BNB: 0,
 }
 
-// =========== Whatsapp setup ===============
-
+// =========== 📲 WhatsApp setup ===============
 const waClient = new WhatsAppClient({
   puppeteer: {
     headless: true,
@@ -43,7 +42,6 @@ const waClient = new WhatsAppClient({
 waClient.on("qr", (qr) => qrcode.generate(qr, { small: true }))
 waClient.on("ready", () => {
   console.log("✅ WhatsApp ready")
-  // 🚀 Launch
   startWatcher()
 })
 waClient.initialize()
@@ -54,20 +52,11 @@ async function sendWhatsAppMessage(msg) {
   await waClient.sendMessage(chatId, msg)
 }
 
-// ========== 📈 Track Price Change ==========
-const lastPrices = {}
-
-// ========== 🔗 WebSocket ==========
-const streams = symbols.map((s) => s.toLowerCase() + "@ticker").join("/")
-const WS_URL = `wss://stream.binance.com:9443/stream?streams=${streams}`
-
 // ========== ⚙️ Step Size ==========
 async function getStepSize(symbol) {
   const { symbols } = await client.getExchangeInfo()
   const info = symbols.find((s) => s.symbol === symbol)
-
   const lotSize = info.filters.find((f) => f.filterType === "LOT_SIZE")
-  console.log(`Step size : ${parseFloat(lotSize.stepSize)} ${info.baseAsset}`)
   return parseFloat(lotSize.stepSize)
 }
 
@@ -82,7 +71,7 @@ async function calculateQuantity(symbol, price) {
   return parseFloat(flooredQty.toFixed(precision))
 }
 
-// ========= Simulate spread ===========
+// ========== 💹 Spread Simulation ==========
 function getSimulatedPrices(price) {
   const spreadPercent = 0.002 // 0.2%
   const ask = price * (1 + spreadPercent / 2)
@@ -93,7 +82,6 @@ function getSimulatedPrices(price) {
 // ========== 📉 Place Buy ==========
 async function placeBuy(symbol, price) {
   const baseAsset = symbol.replace("USDT", "")
-  console.log(symbol, price)
   const quantity = await calculateQuantity(symbol, price)
 
   if (!quantity) {
@@ -103,6 +91,7 @@ async function placeBuy(symbol, price) {
     )
     return
   }
+
   const { ask } = getSimulatedPrices(price)
 
   position = {
@@ -137,11 +126,18 @@ async function placeSell(symbol, quantity, currentPrice) {
   )
 }
 
-// ========== 🧠 Strategy Logic ==========
+// ========== 📈 Price Watcher ==========
+const lastPrices = {}
+const evaluationMap = new Map()
+let evaluateTimer = null
+
 function startWatcher() {
+  const streams = symbols.map((s) => s.toLowerCase() + "@ticker").join("/")
+  const WS_URL = `wss://stream.binance.com:9443/stream?streams=${streams}`
   const ws = new WebSocket(WS_URL)
-  ws.on("open", () => console.log("Connected to Binance WS"))
-  ws.on("error", (err) => console.error("WS Error:", err))
+
+  ws.on("open", () => console.log("🟢 Connected to Binance WS"))
+  ws.on("error", (err) => console.error("❌ WS Error:", err))
   ws.on("close", () => {
     console.log("⚠️ WebSocket closed — reconnecting...")
     setTimeout(startWatcher, 5000)
@@ -150,12 +146,10 @@ function startWatcher() {
   ws.on("message", async (msg) => {
     try {
       const { data } = JSON.parse(msg)
-      // console.log(data)
       const { s: symbol, c, h, l } = data
       const currentPrice = parseFloat(c)
       const high = parseFloat(h)
       const low = parseFloat(l)
-      lastPrices[symbol] = currentPrice
 
       const priceRange = high - low
       const first20pctRange = low + priceRange * 0.2
@@ -163,22 +157,43 @@ function startWatcher() {
       const projectedPrice = currentPrice * 1.02
       const projectedBelowHigh = projectedPrice <= high
 
-      const condition = {
+      lastPrices[symbol] = currentPrice
+
+      // Save evaluation
+      evaluationMap.set(symbol, {
         symbol,
+        currentPrice,
+        low,
         withinLower20pct,
         projectedBelowHigh,
-        projectedPrice,
-        high,
+      })
+
+      // Schedule global evaluation
+      if (!evaluateTimer && !position && !buying) {
+        evaluateTimer = setTimeout(async () => {
+          const candidates = Array.from(evaluationMap.values()).filter(
+            (c) => c.withinLower20pct && c.projectedBelowHigh
+          )
+
+          if (candidates.length > 0) {
+            // ✅ Select the one with currentPrice closest to low
+            const best = candidates.reduce((a, b) => {
+              const aDelta = a.currentPrice - a.low
+              const bDelta = b.currentPrice - b.low
+              return aDelta < bDelta ? a : b
+            })
+
+            buying = true
+            await placeBuy(best.symbol, best.currentPrice)
+            buying = false
+          }
+
+          evaluationMap.clear()
+          evaluateTimer = null
+        }, 1000) // 1-second debounce window
       }
 
-      console.log(condition)
-
-      if (!position && !buying && withinLower20pct && projectedBelowHigh) {
-        buying = true
-        await placeBuy(symbol, currentPrice)
-        buying = false
-      }
-
+      // 💰 Check sell condition
       if (!selling && position && position.symbol === symbol) {
         const { bid } = getSimulatedPrices(currentPrice)
         const gain = bid / position.entryPrice
@@ -192,6 +207,9 @@ function startWatcher() {
       console.error("❌ Parse error:", err)
       buying = false
       selling = false
+      evaluationMap.clear()
+      clearTimeout(evaluateTimer)
+      evaluateTimer = null
     }
   })
 }

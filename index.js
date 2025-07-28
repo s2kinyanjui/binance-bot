@@ -162,6 +162,7 @@ function startWatcher() {
   ws.on("message", async (msg) => {
     try {
       const { data } = JSON.parse(msg)
+      console.log(data)
       const { s: symbol, c, o } = data
       const currentPrice = parseFloat(c)
       const openPrice = parseFloat(o)
