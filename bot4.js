@@ -136,6 +136,7 @@ function startWatcher() {
   ws.on("message", async (msg) => {
     try {
       const { data } = JSON.parse(msg)
+
       const { s: symbol, c, h, l } = data
       const currentPrice = parseFloat(c)
       const high = parseFloat(h)
@@ -148,6 +149,14 @@ function startWatcher() {
       const projectedBelowHigh = projectedPrice <= high
 
       lastPrices[symbol] = currentPrice
+
+      console.log({
+        symbol,
+        currentPrice,
+        low,
+        withinLower20pct,
+        projectedBelowHigh,
+      })
 
       evaluationMap.set(symbol, {
         symbol,
