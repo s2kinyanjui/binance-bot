@@ -4,7 +4,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node bot3.js",
+    "start": "node bot4.js",
     "dev": "nodemon backtest.js"
   },
   "type": "module",
@@ -16,6 +16,7 @@
     "@binance/connector": "^3.6.1",
     "binance": "^3.0.1",
     "dotenv": "^17.2.0",
+    "node-telegram-bot-api": "^0.66.0",
     "qrcode-terminal": "^0.12.0",
     "whatsapp-web.js": "^1.31.0",
     "ws": "^8.18.3"

@@ -1,12 +1,23 @@
 import WebSocket from "ws"
 import { MainClient } from "binance"
-import qrcode from "qrcode-terminal"
-import { Client as WhatsAppClient } from "whatsapp-web.js"
+import dotenv from "dotenv"
+import TelegramBot from "node-telegram-bot-api"
+
+dotenv.config()
 
 // ========== 🔐 Setup ==========
 const API_KEY = process.env.BINANCE_API_KEY
 const API_SECRET = process.env.BINANCE_API_SECRET
 const client = new MainClient({ api_key: API_KEY, api_secret: API_SECRET })
+
+// ========== 📲 Telegram Setup ==========
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID // Your chat ID (can be your user ID or a group ID)
+const tgBot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false })
+
+async function sendTelegramMessage(msg) {
+  await tgBot.sendMessage(TELEGRAM_CHAT_ID, msg)
+}
 
 // ========== 🎯 Config ==========
 const BUDGET = 30
@@ -15,7 +26,7 @@ const symbols = ["AR", "AAVE", "JTO", "BTC", "SOL", "ETH", "XRP", "BNB"].map(
   (s) => s + "USDT"
 )
 
-let position = null // { symbol, entryPrice, quantity, quoteId }
+let position = null
 let buying = false
 let selling = false
 
@@ -29,27 +40,6 @@ const balances = {
   ETH: 0,
   XRP: 0,
   BNB: 0,
-}
-
-// =========== 📲 WhatsApp setup ===============
-const waClient = new WhatsAppClient({
-  puppeteer: {
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  },
-})
-
-waClient.on("qr", (qr) => qrcode.generate(qr, { small: true }))
-waClient.on("ready", () => {
-  console.log("✅ WhatsApp ready")
-  startWatcher()
-})
-waClient.initialize()
-
-async function sendWhatsAppMessage(msg) {
-  const number = "254748920306"
-  const chatId = number + "@c.us"
-  await waClient.sendMessage(chatId, msg)
 }
 
 // ========== ⚙️ Step Size ==========
@@ -86,7 +76,7 @@ async function placeBuy(symbol, price) {
 
   if (!quantity) {
     console.log(`❌ Cannot buy ${symbol}: quantity too low for budget`)
-    await sendWhatsAppMessage(
+    await sendTelegramMessage(
       `❌ Skipped buy: Budget too low to buy ${symbol} at $${price}`
     )
     return
@@ -103,7 +93,7 @@ async function placeBuy(symbol, price) {
   balances.USDT -= ask * quantity
   balances[baseAsset] += quantity
   console.log(`🟠 Bought ${quantity} ${baseAsset} at $${ask.toFixed(2)}`)
-  await sendWhatsAppMessage(
+  await sendTelegramMessage(
     `🟠 Bought ${quantity} ${baseAsset} at $${ask.toFixed(
       2
     )}\nNew USDT Balance: $${balances.USDT.toFixed(2)}`
@@ -119,7 +109,7 @@ async function placeSell(symbol, quantity, currentPrice) {
   balances.USDT += sellValue
   position = null
   console.log(`🟢 Sold ${quantity} ${baseAsset} at $${bid.toFixed(2)}`)
-  await sendWhatsAppMessage(
+  await sendTelegramMessage(
     `🟢 Sold ${quantity} ${baseAsset} at $${bid.toFixed(
       2
     )}\nNew USDT Balance: $${balances.USDT.toFixed(2)}`
@@ -159,7 +149,6 @@ function startWatcher() {
 
       lastPrices[symbol] = currentPrice
 
-      // Save evaluation
       evaluationMap.set(symbol, {
         symbol,
         currentPrice,
@@ -168,7 +157,6 @@ function startWatcher() {
         projectedBelowHigh,
       })
 
-      // Schedule global evaluation
       if (!evaluateTimer && !position && !buying) {
         evaluateTimer = setTimeout(async () => {
           const candidates = Array.from(evaluationMap.values()).filter(
@@ -176,7 +164,6 @@ function startWatcher() {
           )
 
           if (candidates.length > 0) {
-            // ✅ Select the one with currentPrice closest to low
             const best = candidates.reduce((a, b) => {
               const aDelta = a.currentPrice - a.low
               const bDelta = b.currentPrice - b.low
@@ -190,10 +177,9 @@ function startWatcher() {
 
           evaluationMap.clear()
           evaluateTimer = null
-        }, 1000) // 1-second debounce window
+        }, 1000)
       }
 
-      // 💰 Check sell condition
       if (!selling && position && position.symbol === symbol) {
         const { bid } = getSimulatedPrices(currentPrice)
         const gain = bid / position.entryPrice
@@ -213,3 +199,14 @@ function startWatcher() {
     }
   })
 }
+
+// ========== 🚀 Start ==========
+
+async function startBot() {
+  await sendTelegramMessage(
+    "🚀 Binance Telegram bot has started and is watching prices..."
+  )
+  startWatcher()
+}
+
+startBot()
