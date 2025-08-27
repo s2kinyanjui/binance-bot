@@ -21,7 +21,7 @@ async function sendTelegramMessage(msg) {
 }
 
 const balances = {
-  USDT: 30,
+  USDT: 100,
   AR: 0,
 }
 let entryPrice = null
@@ -168,12 +168,12 @@ function startWatcher() {
             const takeProfit = entryPrice * 1.005 // +0.5%
             const stopLoss = entryPrice * 0.995 // -0.5%
 
-            if (price >= takeProfit) {
-              await fromAR(price, "Take Profit (+0.5%)")
-            } else if (price <= stopLoss) {
-              await fromAR(price, "Stop Loss (-0.5%)")
+            if (priceNow >= takeProfit) {
+              await fromAR(priceNow, "Take Profit (+0.5%)")
+            } else if (priceNow <= stopLoss) {
+              await fromAR(priceNow, "Stop Loss (-0.5%)")
             } else if (MA3 < MA20) {
-              await fromAR(price, "MA3 crossed below MA20")
+              await fromAR(priceNow, "MA3 crossed below MA20")
             }
           }
         }
