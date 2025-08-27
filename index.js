@@ -152,7 +152,23 @@ function startWatcher() {
             })[0]
           )
 
+          const prevMA3 = roundUp2(
+            ti.SMA.calculate({
+              period: 3,
+              values: closes.slice(-4, -1), // one candle before
+            })[0]
+          )
+
+          const prevMA20 = roundUp2(
+            ti.SMA.calculate({
+              period: 20,
+              values: closes.slice(-21, -1), // one candle before
+            })[0]
+          )
+
           console.log({
+            prevMA3,
+            prevMA20,
             MA3,
             MA20,
             priceNow,
@@ -160,7 +176,9 @@ function startWatcher() {
 
           // If MA3 > MA20 , convert to AR
 
-          if (MA3 > MA20 && balances.USDT > 10) {
+          const crossedUp = prevMA3 <= prevMA20 && MA3 > MA20
+
+          if (crossedUp && balances.USDT > 10) {
             toAR(priceNow)
           }
 
