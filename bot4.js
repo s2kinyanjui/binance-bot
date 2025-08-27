@@ -2,6 +2,7 @@ import WebSocket from "ws"
 import { MainClient } from "binance"
 import dotenv from "dotenv"
 import TelegramBot from "node-telegram-bot-api"
+import ti from "technicalindicators"
 
 dotenv.config()
 
@@ -19,28 +20,11 @@ async function sendTelegramMessage(msg) {
   await tgBot.sendMessage(TELEGRAM_CHAT_ID, msg)
 }
 
-// ========== 🎯 Config ==========
-const BUDGET = 30
-const TARGET_GAIN = 1.02
-const symbols = ["AR", "AAVE", "JTO", "BTC", "SOL", "ETH", "XRP", "BNB"].map(
-  (s) => s + "USDT"
-)
-
-let position = null
-let buying = false
-let selling = false
-
 const balances = {
   USDT: 30,
   AR: 0,
-  AAVE: 0,
-  JTO: 0,
-  BTC: 0,
-  SOL: 0,
-  ETH: 0,
-  XRP: 0,
-  BNB: 0,
 }
+let entryPrice = null
 
 // ========== ⚙️ Step Size ==========
 async function getStepSize(symbol) {
@@ -51,160 +35,149 @@ async function getStepSize(symbol) {
 }
 
 // ========== 🧮 Quantity ==========
-async function calculateQuantity(symbol, price) {
+async function calculateQuantity(price) {
+  let symbol = "ARUSDT"
+
   const stepSize = await getStepSize(symbol)
   const precision = stepSize.toString().split(".")[1]?.length || 0
-  const rawQty = BUDGET / price
+
+  const rawQty = balances.USDT / price // ARs to buy
   const factor = Math.pow(10, precision)
   const flooredQty = Math.floor(rawQty * factor) / factor
   if (flooredQty < stepSize) return null
   return parseFloat(flooredQty.toFixed(precision))
 }
 
-// ========== 💹 Spread Simulation ==========
-function getSimulatedPrices(price) {
-  const spreadPercent = 0.002 // 0.2%
-  const ask = price * (1 + spreadPercent / 2)
-  const bid = price * (1 - spreadPercent / 2)
-  return { ask, bid }
-}
+// ========== 📉 Convert to AR ==========
+async function toAR(price) {
+  const quantity = await calculateQuantity(price)
+  if (!quantity) return
 
-// ========== 📉 Place Buy ==========
-async function placeBuy(symbol, price) {
-  const baseAsset = symbol.replace("USDT", "")
-  const quantity = await calculateQuantity(symbol, price)
+  balances.USDT -= quantity * price
+  balances.AR += quantity
+  entryPrice = price // save buy price
 
-  if (!quantity) {
-    console.log(`❌ Cannot buy ${symbol}: quantity too low for budget`)
-    await sendTelegramMessage(
-      `❌ Skipped buy: Budget too low to buy ${symbol} at $${price}`
-    )
-    return
-  }
-
-  const { ask } = getSimulatedPrices(price)
-
-  position = {
-    symbol,
-    entryPrice: ask,
-    quoteId: null,
-    quantity,
-  }
-  balances.USDT -= ask * quantity
-  balances[baseAsset] += quantity
-  console.log(`🟠 Bought ${quantity} ${baseAsset} at $${ask.toFixed(2)}`)
   await sendTelegramMessage(
-    `🟠 Bought ${quantity} ${baseAsset} at $${ask.toFixed(
+    `🟢 Bought AR @ ${price.toFixed(
+      4
+    )}\n Qty: ${quantity}\n USDT: ${balances.USDT.toFixed(
       2
-    )}\nNew USDT Balance: $${balances.USDT.toFixed(2)}`
+    )}\n AR: ${balances.AR.toFixed(2)}`
   )
 }
 
-// ========== 💰 Place Sell ==========
-async function placeSell(symbol, quantity, currentPrice) {
-  const baseAsset = symbol.replace("USDT", "")
-  const { bid } = getSimulatedPrices(currentPrice)
-  const sellValue = bid * quantity
-  balances[baseAsset] -= quantity
-  balances.USDT += sellValue
-  position = null
-  console.log(`🟢 Sold ${quantity} ${baseAsset} at $${bid.toFixed(2)}`)
+// ========== 💰 Convert from AR ==========
+async function fromAR(price, reason) {
+  const usdtReceived = balances.AR * price
+  balances.USDT += usdtReceived
+  balances.AR = 0
+  entryPrice = null
+
   await sendTelegramMessage(
-    `🟢 Sold ${quantity} ${baseAsset} at $${bid.toFixed(
+    `🔴 Sold AR @ ${price.toFixed(
+      4
+    )}\n Reason: ${reason}\n Received $${usdtReceived.toFixed(
       2
-    )}\nNew USDT Balance: $${balances.USDT.toFixed(2)}`
+    )}\n USDT: $${balances.USDT.toFixed(2)}\n AR: ${balances.AR.toFixed(2)}`
   )
+}
+
+function roundUp2(num) {
+  return Math.ceil(num * 100) / 100
 }
 
 // ========== 📈 Price Watcher ==========
-const lastPrices = {}
-const evaluationMap = new Map()
-let evaluateTimer = null
-
 function startWatcher() {
-  const streams = symbols.map((s) => s.toLowerCase() + "@ticker").join("/")
-  const WS_URL = `wss://stream.binance.com:9443/stream?streams=${streams}`
-  const ws = new WebSocket(WS_URL)
+  const closes = []
+  let latestPrice = null
 
-  ws.on("open", () => console.log("🟢 Connected to Binance WS"))
-  ws.on("error", (err) => console.error("❌ WS Error:", err))
+  const ws = new WebSocket(
+    "wss://stream.binance.com:9443/stream?streams=arusdt@kline_3m/arusdt@trade"
+  )
+
+  ws.on("open", () => console.log("Connected to Binance"))
+
   ws.on("close", () => {
-    console.log("⚠️ WebSocket closed — reconnecting...")
-    setTimeout(startWatcher, 5000)
+    console.log("Disconnected...")
+    closes.length = 0
+    setTimeout(startWatcher, 2000)
   })
 
-  ws.on("message", async (msg) => {
-    try {
-      const { data } = JSON.parse(msg)
+  ws.on("error", (err) => console.error("WebSocket error:", err))
 
-      const { s: symbol, c, h, l } = data
-      const currentPrice = parseFloat(c)
-      const high = parseFloat(h)
-      const low = parseFloat(l)
+  ws.on("message", async (data) => {
+    const received = JSON.parse(data)
+    const msg = received.data
 
-      const priceRange = high - low
-      const first20pctRange = low + priceRange * 0.2
-      const withinLower20pct = currentPrice <= first20pctRange
-      const projectedPrice = currentPrice * 1.02
-      const projectedBelowHigh = projectedPrice <= high
+    console.log("message received")
 
-      lastPrices[symbol] = currentPrice
+    // Candle data
+    if (msg.e === "kline") {
+      const {
+        k: { x: isClosed, c },
+      } = msg
 
-      console.log({
-        symbol,
-        currentPrice,
-        low,
-        withinLower20pct,
-        projectedBelowHigh,
-      })
+      if (isClosed) {
+        const closePrice = parseFloat(c)
 
-      evaluationMap.set(symbol, {
-        symbol,
-        currentPrice,
-        low,
-        withinLower20pct,
-        projectedBelowHigh,
-      })
+        closes.push(closePrice)
 
-      if (!evaluateTimer && !position && !buying) {
-        evaluateTimer = setTimeout(async () => {
-          const candidates = Array.from(evaluationMap.values()).filter(
-            (c) => c.withinLower20pct && c.projectedBelowHigh
-          )
-
-          if (candidates.length > 0) {
-            const best = candidates.reduce((a, b) => {
-              const aDelta = a.currentPrice - a.low
-              const bDelta = b.currentPrice - b.low
-              return aDelta < bDelta ? a : b
-            })
-
-            buying = true
-            await placeBuy(best.symbol, best.currentPrice)
-            buying = false
-          }
-
-          evaluationMap.clear()
-          evaluateTimer = null
-        }, 1000)
-      }
-
-      if (!selling && position && position.symbol === symbol) {
-        const { bid } = getSimulatedPrices(currentPrice)
-        const gain = bid / position.entryPrice
-        if (gain >= TARGET_GAIN) {
-          selling = true
-          await placeSell(symbol, position.quantity, currentPrice)
-          selling = false
+        if (closes.length > 25) {
+          closes.shift()
         }
       }
-    } catch (err) {
-      console.error("❌ Parse error:", err)
-      buying = false
-      selling = false
-      evaluationMap.clear()
-      clearTimeout(evaluateTimer)
-      evaluateTimer = null
+    }
+
+    // Trade data
+    if (msg.e === "trade") {
+      const priceNow = parseFloat(msg.p)
+
+      // Price changed
+      if (priceNow !== latestPrice) {
+        latestPrice = priceNow
+        console.log("Current price:", priceNow)
+
+        if (closes.length > 20) {
+          const MA3 = roundUp2(
+            ti.SMA.calculate({
+              period: 3,
+              values: closes.slice(-3),
+            })[0]
+          )
+
+          const MA20 = roundUp2(
+            ti.SMA.calculate({
+              period: 20,
+              values: closes.slice(-20),
+            })[0]
+          )
+
+          console.log({
+            MA3,
+            MA20,
+            priceNow,
+          })
+
+          // If MA3 > MA20 , convert to AR
+
+          if (MA3 > MA20 && balances.USDT > 10) {
+            toAR(priceNow)
+          }
+
+          if (balances.AR > 0 && entryPrice) {
+            const takeProfit = entryPrice * 1.005 // +0.5%
+            const stopLoss = entryPrice * 0.995 // -0.5%
+
+            if (price >= takeProfit) {
+              await fromAR(price, "Take Profit (+0.5%)")
+            } else if (price <= stopLoss) {
+              await fromAR(price, "Stop Loss (-0.5%)")
+            } else if (MA3 < MA20) {
+              await fromAR(price, "MA3 crossed below MA20")
+            }
+          }
+        }
+      }
     }
   })
 }
