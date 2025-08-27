@@ -137,7 +137,7 @@ function startWatcher() {
         latestPrice = priceNow
         console.log("Current price:", priceNow)
 
-        if (closes.length > 20) {
+        if (closes.length > 22) {
           const MA3 = roundUp2(
             ti.SMA.calculate({
               period: 3,
