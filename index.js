@@ -86,6 +86,9 @@ function roundUp2(num) {
   return Math.ceil(num * 100) / 100
 }
 
+let crossedDown = false
+let crossedUp = false
+
 // ========== 📈 Price Watcher ==========
 function startWatcher() {
   const closes = []
@@ -109,22 +112,17 @@ function startWatcher() {
     const received = JSON.parse(data)
     const msg = received.data
 
-    console.log("message received")
-
     // Candle data
     if (msg.e === "kline") {
       const {
-        k: { x: isClosed, c },
+        k: { c },
       } = msg
 
-      if (isClosed) {
-        const closePrice = parseFloat(c)
+      const closePrice = parseFloat(c)
+      closes.push(closePrice)
 
-        closes.push(closePrice)
-
-        if (closes.length > 25) {
-          closes.shift()
-        }
+      if (closes.length > 25) {
+        closes.shift()
       }
     }
 
@@ -132,67 +130,84 @@ function startWatcher() {
     if (msg.e === "trade") {
       const priceNow = parseFloat(msg.p)
 
-      // Price changed
       if (priceNow !== latestPrice) {
         latestPrice = priceNow
         console.log("Current price:", priceNow)
 
-        if (closes.length > 22) {
-          const MA3 = roundUp2(
+        let closesNow = closes
+
+        if (closesNow.length > 22) {
+          const a3 = roundUp2(
             ti.SMA.calculate({
               period: 3,
-              values: closes.slice(-3),
+              values: closesNow.slice(-5, -2),
             })[0]
           )
 
-          const MA20 = roundUp2(
-            ti.SMA.calculate({
-              period: 20,
-              values: closes.slice(-20),
-            })[0]
-          )
-
-          const prevMA3 = roundUp2(
+          const b3 = roundUp2(
             ti.SMA.calculate({
               period: 3,
-              values: closes.slice(-4, -1), // one candle before
+              values: closesNow.slice(-4, -1),
             })[0]
           )
 
-          const prevMA20 = roundUp2(
+          const c3 = roundUp2(
+            ti.SMA.calculate({
+              period: 3,
+              values: closesNow.slice(-3),
+            })[0]
+          )
+
+          const b20 = roundUp2(
+            ti.SMA.calculate({
+              period: 3,
+              values: closesNow.slice(-21, -1),
+            })[0]
+          )
+
+          const c20 = roundUp2(
             ti.SMA.calculate({
               period: 20,
-              values: closes.slice(-21, -1), // one candle before
+              values: closesNow.slice(-20),
             })[0]
           )
 
-          console.log({
-            prevMA3,
-            prevMA20,
-            MA3,
-            MA20,
-            priceNow,
-          })
+          // Detect crossovers
 
-          // If MA3 > MA20 , convert to AR
-
-          const crossedUp = prevMA3 <= prevMA20 && MA3 > MA20
-
-          if (crossedUp && balances.USDT > 10) {
-            toAR(priceNow)
+          // Crossing down
+          if (b3 >= b20 && c3 < c20) {
+            crossedDown = true
           }
 
-          if (balances.AR > 0 && entryPrice) {
-            const takeProfit = entryPrice * 1.005 // +0.5%
-            const stopLoss = entryPrice * 0.995 // -0.5%
+          // Crossing up
+          if (c3 > c20 && b3 <= b20) {
+            crossedDown = false
+          }
 
-            if (priceNow >= takeProfit) {
-              await fromAR(priceNow, "Take Profit (+0.5%)")
-            } else if (priceNow <= stopLoss) {
-              await fromAR(priceNow, "Stop Loss (-0.5%)")
-            } else if (MA3 < MA20) {
-              await fromAR(priceNow, "MA3 crossed below MA20")
-            }
+          let priceRising
+
+          const x = roundUp2(
+            ti.SMA.calculate({
+              period: 3,
+              values: closesNow.slice(-5, -2),
+            })[0]
+          )
+
+          const y = b3
+          const z = c3
+
+          if (z > y && y > x) {
+            priceRising = true
+          }
+
+          if (crossedDown && balances.USDT > 10 && priceRising) {
+            // Buy
+            await toAR(priceNow)
+          }
+
+          // Reversal
+          if (z < y && y < x && balances.AR > 5) {
+            await fromAR(priceNow, `Reversal`)
           }
         }
       }
