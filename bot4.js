@@ -58,7 +58,7 @@ async function toAR(price) {
   entryPrice = price // save buy price
 
   await sendTelegramMessage(
-    `🟢Bot 2: Bought AR @ ${price.toFixed(
+    `🟢Bot 4: Bought AR @ ${price.toFixed(
       4
     )}\n Qty: ${quantity}\n USDT: ${balances.USDT.toFixed(
       2
@@ -74,7 +74,7 @@ async function fromAR(price, reason) {
   entryPrice = null
 
   await sendTelegramMessage(
-    `🔴Bot 2: Sold AR @ ${price.toFixed(
+    `🔴Bot 4: Sold AR @ ${price.toFixed(
       4
     )}\n Reason: ${reason}\n Received $${usdtReceived.toFixed(
       2
