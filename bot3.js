@@ -16,15 +16,23 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID // Your chat ID (can be your user ID or a group ID)
 const tgBot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false })
 
-async function sendTelegramMessage(msg) {
-  await tgBot.sendMessage(TELEGRAM_CHAT_ID, msg)
-}
+const closes = []
+let latestPrice = null
+let latestCandleTime = null
 
-const balances = {
+let crossedDown = false
+let entryPrice = null
+let balances = {
   USDT: 100,
   AR: 0,
 }
-let entryPrice = null
+
+let priceFalling = false
+let priceRising = false
+
+async function sendTelegramMessage(msg) {
+  await tgBot.sendMessage(TELEGRAM_CHAT_ID, msg)
+}
 
 // ========== ⚙️ Step Size ==========
 async function getStepSize(symbol) {
@@ -58,9 +66,9 @@ async function toAR(price) {
   entryPrice = price // save buy price
 
   await sendTelegramMessage(
-    `🟢Bot 2: Bought AR @ ${price.toFixed(
+    `🟢Bot 3: Bought AR @ ${price.toFixed(
       4
-    )}\n Qty: ${quantity}\n USDT: ${balances.USDT.toFixed(
+    )}\n Qty: ${quantity}\n\n USDT: ${balances.USDT.toFixed(
       2
     )}\n AR: ${balances.AR.toFixed(2)}`
   )
@@ -74,25 +82,20 @@ async function fromAR(price, reason) {
   entryPrice = null
 
   await sendTelegramMessage(
-    `🔴Bot 2: Sold AR @ ${price.toFixed(
+    `🔴Bot 3: Sold AR @ ${price.toFixed(
       4
     )}\n Reason: ${reason}\n Received $${usdtReceived.toFixed(
       2
-    )}\n USDT: $${balances.USDT.toFixed(2)}\n AR: ${balances.AR.toFixed(2)}`
+    )}\n\n USDT: $${balances.USDT.toFixed(2)}\n AR: ${balances.AR.toFixed(2)}`
   )
 }
 
 function roundUp2(num) {
-  return Math.ceil(num * 1000) / 1000
+  return Math.ceil(num * 100) / 100
 }
-
-let crossedDown = false
 
 // ========== 📈 Price Watcher ==========
 function startWatcher() {
-  const closes = []
-  let latestPrice = null
-
   const ws = new WebSocket(
     "wss://stream.binance.com:9443/stream?streams=arusdt@kline_3m/arusdt@trade"
   )
@@ -107,104 +110,140 @@ function startWatcher() {
 
   ws.on("error", (err) => console.error("WebSocket error:", err))
 
+  // State
+
   ws.on("message", async (data) => {
     const received = JSON.parse(data)
     const msg = received.data
 
-    // Candle data
+    // === Candle data (kline) ===
     if (msg.e === "kline") {
       const {
-        k: { c, x },
+        k: { c, x, t },
       } = msg
 
-      if (x) {
-        const closePrice = parseFloat(c)
-        closes.push(closePrice)
-      }
+      const closePrice = parseFloat(c)
 
-      if (closes.length > 25) {
-        closes.shift()
+      if (x) {
+        // Candle just closed
+        if (!latestCandleTime || latestCandleTime !== t) {
+          latestCandleTime = t
+
+          console.log("Candle closed:", closePrice)
+
+          // Remove oldest if we already have 25
+          if (closes.length >= 25) closes.shift()
+
+          // Push the closed candle
+          closes.push(closePrice)
+        }
+      } else {
+        // Candle still forming → update last element
+        if (closes.length === 0) {
+          closes.push(closePrice)
+        } else {
+          closes[closes.length - 1] = closePrice
+        }
       }
     }
 
-    // Trade data
+    // === Trade data (do NOT modify closes) ===
     if (msg.e === "trade") {
       const priceNow = parseFloat(msg.p)
 
       if (priceNow !== latestPrice) {
         latestPrice = priceNow
-        console.log("Current price:", priceNow)
 
-        closes.push(priceNow)
-        let closesNow = closes
-
-        console.log(closesNow)
-
-        if (closesNow.length > 22) {
-          const b3 = roundUp2(
+        // Only calculate SMA if we have enough candles
+        if (closes.length > 22) {
+          // SMA3 old , prev , curr calculation
+          const sma3_old = roundUp2(
             ti.SMA.calculate({
               period: 3,
-              values: closesNow.slice(-4, -1),
+              values: closes.slice(-5, -2),
             })[0]
           )
 
-          const c3 = roundUp2(
+          const sma3_prev = roundUp2(
             ti.SMA.calculate({
               period: 3,
-              values: closesNow.slice(-3),
+              values: closes.slice(-4, -1),
             })[0]
           )
 
-          const b20 = roundUp2(
+          const sma3_curr = roundUp2(
+            ti.SMA.calculate({
+              period: 3,
+              values: closes.slice(-3),
+            })[0]
+          )
+
+          // SMA20 old , prev , curr calulation
+          const sma20_old = roundUp2(
             ti.SMA.calculate({
               period: 20,
-              values: closesNow.slice(-21, -1),
+              values: closes.slice(-22, -2),
             })[0]
           )
 
-          const c20 = roundUp2(
+          const sma20_prev = roundUp2(
             ti.SMA.calculate({
               period: 20,
-              values: closesNow.slice(-20),
+              values: closes.slice(-21, -1),
             })[0]
           )
 
-          // Detect crossovers
+          const sma20_curr = roundUp2(
+            ti.SMA.calculate({
+              period: 20,
+              values: closes.slice(-20),
+            })[0]
+          )
 
-          // Crossing down
-          if (b3 >= b20 && c3 < c20) {
+          // Buy Conditions
+
+          if (sma3_prev >= sma20_prev && sma3_curr < sma20_curr) {
             crossedDown = true
           }
 
-          // Crossing up
-          if (c3 > c20 && b3 <= b20) {
+          if (sma3_curr > sma20_curr && sma3_prev <= sma20_prev) {
             crossedDown = false
           }
 
-          let priceRising
-
-          const x = roundUp2(
-            ti.SMA.calculate({
-              period: 3,
-              values: closesNow.slice(-5, -2),
-            })[0]
-          )
-
-          const y = b3
-          const z = c3
-
-          if (z > y && y > x) {
+          if (
+            sma3_curr > sma3_prev &&
+            sma3_prev > sma3_old &&
+            sma20_old > sma20_prev &&
+            sma20_prev > sma20_curr
+          ) {
             priceRising = true
           }
 
-          if (crossedDown && balances.USDT > 10 && priceRising && !entryPrice) {
-            // Buy
+          if (sma3_curr < sma3_prev && sma3_prev < sma3_old) {
+            priceFalling = true
+          }
+
+          console.log({
+            sma3_old,
+            sma3_prev,
+            sma3_curr,
+            sma20_old,
+            sma20_prev,
+            sma20_curr,
+            crossedDown,
+            priceRising,
+            priceFalling,
+            entryPrice,
+          })
+
+          if (priceRising && crossedDown && !entryPrice) {
             await toAR(priceNow)
           }
 
-          // Reversal
-          if (z < y && y < x && balances.AR > 5) {
-            await fromAR(priceNow, `Reversal`)
+          // Sell condition
+
+          if (entryPrice && priceFalling) {
+            await fromAR(priceNow, `Price falling`)
           }
         }
       }
@@ -216,7 +255,7 @@ function startWatcher() {
 
 async function startBot() {
   await sendTelegramMessage(
-    "🚀 Binance Telegram bot 2 has started and is watching prices..."
+    "🚀 Binance Telegram bot 3 has started and is watching prices..."
   )
   startWatcher()
 }
