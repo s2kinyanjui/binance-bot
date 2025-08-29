@@ -218,7 +218,7 @@ function startWatcher() {
 
 async function startBot() {
   await sendTelegramMessage(
-    "🚀 Binance Telegram bot 2 has started and is watching prices..."
+    "🚀 Binance Telegram bot 4 has started and is watching prices..."
   )
   startWatcher()
 }
