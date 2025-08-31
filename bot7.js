@@ -208,7 +208,7 @@ function startWatcher() {
         }
       }
     }
-  })
+  }
 }
 
 // ========== 🚀 Start ==========
