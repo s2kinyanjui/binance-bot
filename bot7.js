@@ -13,7 +13,7 @@ const client = new MainClient({ api_key: API_KEY, api_secret: API_SECRET })
 
 // ========== 📲 Telegram Setup ==========
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
-const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID // Your chat ID (can be your user ID or a group ID)
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID
 const tgBot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false })
 
 async function sendTelegramMessage(msg) {
@@ -25,7 +25,7 @@ const balances = {
   AR: 0,
 }
 let entryPrice = null
-let lastUpdate 
+let lastUpdate = null // ✅ initialized
 
 // ========== ⚙️ Step Size ==========
 async function getStepSize(symbol) {
@@ -42,7 +42,7 @@ async function calculateQuantity(price) {
   const stepSize = await getStepSize(symbol)
   const precision = stepSize.toString().split(".")[1]?.length || 0
 
-  const rawQty = balances.USDT / price // ARs to buy
+  const rawQty = balances.USDT / price
   const factor = Math.pow(10, precision)
   const flooredQty = Math.floor(rawQty * factor) / factor
   if (flooredQty < stepSize) return null
@@ -56,14 +56,10 @@ async function toAR(price) {
 
   balances.USDT -= quantity * price
   balances.AR += quantity
-  entryPrice = price // save buy price
+  entryPrice = price
 
   await sendTelegramMessage(
-    `🟢Bot 7: Bought AR @ ${price.toFixed(
-      4
-    )}\n Qty: ${quantity}\n\n USDT: ${balances.USDT.toFixed(
-      2
-    )}\n AR: ${balances.AR.toFixed(2)}`
+    `🟢Bot 7: Bought AR @ ${price.toFixed(4)}\n Qty: ${quantity}\n\n USDT: ${balances.USDT.toFixed(2)}\n AR: ${balances.AR.toFixed(2)}`
   )
 }
 
@@ -75,11 +71,7 @@ async function fromAR(price, reason) {
   entryPrice = null
 
   await sendTelegramMessage(
-    `🔴Bot 7 : Sold AR @ ${price.toFixed(
-      4
-    )}\n Reason: ${reason}\n Received $${usdtReceived.toFixed(
-      2
-    )}\n\n USDT: $${balances.USDT.toFixed(2)}\n AR: ${balances.AR.toFixed(2)}`
+    `🔴Bot 7 : Sold AR @ ${price.toFixed(4)}\n Reason: ${reason}\n Received $${usdtReceived.toFixed(2)}\n\n USDT: $${balances.USDT.toFixed(2)}\n AR: ${balances.AR.toFixed(2)}`
   )
 }
 
@@ -100,7 +92,6 @@ function regressionSlope(values) {
   })
 
   return num / den
-
 }
 
 let crossedDown = false
@@ -136,17 +127,17 @@ function startWatcher() {
 
       if (x) {
         const closePrice = parseFloat(c)
-        
-        if ( lastUpdate == "tradePrice" ) {
+
+        if (lastUpdate === "tradePrice") {
           closes[closes.length - 1] = closePrice
-          lastUpdate = "candleClose"
         } else {
           closes.push(closePrice)
-          lastUpdate = "candleClose"
         }
+        lastUpdate = "candleClose"
 
-      if (closes.length > 25) {
-        closes.shift()
+        if (closes.length > 25) {
+          closes.shift()
+        }
       }
     }
 
@@ -158,61 +149,51 @@ function startWatcher() {
         latestPrice = priceNow
         console.log("Current price:", priceNow)
 
-        if ( lastUpdate == "tradePrice" ) {
-           closes[closes.length - 1] = priceNow
-           lastUpdate = "tradePrice"
+        if (lastUpdate === "tradePrice") {
+          closes[closes.length - 1] = priceNow
         } else {
-           closes.push(priceNow)
-           lastUpdate = "tradePrice"
+          closes.push(priceNow)
         }
-        
-        let closesNow = closes
+        lastUpdate = "tradePrice"
 
+        let closesNow = closes
         console.log(closesNow)
 
         if (closesNow.length > 22) {
+          const shortMA = ti.SMA.calculate({
+            period: 3,
+            values: closesNow.slice(-3),
+          })[0]
 
-          // Moving average condition
-          const shortMA = 
-            ti.SMA.calculate({
-              period: 3,
-              values: closesNow.slice(-3),
-            })[0]
-          
+          const longMA = ti.SMA.calculate({
+            period: 20,
+            values: closesNow.slice(-20),
+          })[0]
 
-          const longMA =
-            ti.SMA.calculate({
-              period: 20,
-              values: closesNow.slice(-20),
-            })[0]
-          
+          const pastMA = ti.SMA.calculate({
+            period: 3,
+            values: closesNow.slice(-7, -4),
+          })[0]
 
-          // SMA drop
-
-          const pastMA = 
-            ti.SMA.calculate({
-              period : 3,
-              values : closesNow.slice(-7,-4),
-            })[0]
-            
-
-          if (shortMA < longMA && ((pastMA - shortMA)/pastMA) > 0.01 && !entryPrice && regressionSlope(closes.slice(-5)) < 0 ) {
-            // Buy
+          if (
+            shortMA < longMA &&
+            (pastMA - shortMA) / pastMA > 0.01 &&
+            !entryPrice &&
+            regressionSlope(closes.slice(-5)) < 0
+          ) {
             await toAR(priceNow)
           }
 
-          // Target reached
-          if (entryPrice && priceNow >= entryPrice * 1.005){
+          if (entryPrice && priceNow >= entryPrice * 1.005) {
             await fromAR(priceNow, `Target reached`)
           }
         }
       }
     }
-  }
+  })
 }
 
 // ========== 🚀 Start ==========
-
 async function startBot() {
   await sendTelegramMessage(
     "🚀 Binance Telegram bot 2 has started and is watching prices..."
