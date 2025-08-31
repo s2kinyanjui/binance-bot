@@ -136,9 +136,14 @@ function startWatcher() {
 
       if (x) {
         const closePrice = parseFloat(c)
-        closes.push(closePrice)
-        lastUpdate = "candleClose"
-      }
+        
+        if ( lastUpdate == "tradePrice" ) {
+          closes[closes.length - 1] = closePrice
+          lastUpdate = "candleClose"
+        } else {
+          closes.push(closePrice)
+          lastUpdate = "candleClose"
+        }
 
       if (closes.length > 25) {
         closes.shift()
@@ -168,36 +173,36 @@ function startWatcher() {
         if (closesNow.length > 22) {
 
           // Moving average condition
-          const shortMA = roundUp2(
+          const shortMA = 
             ti.SMA.calculate({
               period: 3,
               values: closesNow.slice(-3),
             })[0]
-          )
+          
 
-          const longMA = roundUp2(
+          const longMA =
             ti.SMA.calculate({
               period: 20,
               values: closesNow.slice(-20),
             })[0]
-          )
+          
 
           // SMA drop
 
-          const pastMA = roundUp2(
+          const pastMA = 
             ti.SMA.calculate({
               period : 3,
               values : closesNow.slice(-7,-4),
             })[0]
-            )
+            
 
-          if (shortMA < longMA && ((pastMA - shortMA)/pastMA) > 0.01 && !entryPrice && regressionSlope(closes.slice(-5)) == 0 ) {
+          if (shortMA < longMA && ((pastMA - shortMA)/pastMA) > 0.01 && !entryPrice && regressionSlope(closes.slice(-5)) < 0 ) {
             // Buy
             await toAR(priceNow)
           }
 
           // Reversal
-          if (priceNow > entryPrice * 0.005 && entryPrice) {
+          if (priceNow > entryPrice * 1.005 && entryPrice) {
             await fromAR(priceNow, `Target reached`)
           }
         }
