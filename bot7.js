@@ -201,8 +201,8 @@ function startWatcher() {
             await toAR(priceNow)
           }
 
-          // Reversal
-          if (priceNow > entryPrice * 1.005 && entryPrice) {
+          // Target reached
+          if (entryPrice && priceNow >= entryPrice * 1.005){
             await fromAR(priceNow, `Target reached`)
           }
         }
