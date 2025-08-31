@@ -159,7 +159,7 @@ function startWatcher() {
           }
 
           // Reversal
-          if (entryPrice && priceNow >= entryPrice + (0.005*entryPrice) {
+          if (entryPrice && priceNow >= entryPrice + (0.005*entryPrice)) {
             await fromAR(priceNow, `Target attained`)
           }
         }
