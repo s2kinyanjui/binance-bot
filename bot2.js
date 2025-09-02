@@ -197,7 +197,7 @@ function startWatcher() {
             priceRising = true
           }
 
-          if (crossedDown && priceRising && ) {
+          if (crossedDown && priceRising ) {
             // Buy          
                 await fromAR(priceNow, `Reversal`)
           }
