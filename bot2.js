@@ -197,14 +197,14 @@ function startWatcher() {
             priceRising = true
           }
 
-          if (crossedDown && balances.USDT > 10 && priceRising && !entryPrice) {
-            // Buy
-            await toAR(priceNow)
+          if (crossedDown && priceRising && ) {
+            // Buy          
+                await fromAR(priceNow, `Reversal`)
           }
 
           // Reversal
-          if (z < y && y < x && balances.AR > 5) {
-            await fromAR(priceNow, `Reversal`)
+          if (z < y && y < x && !entryPrice) {
+             await toAR(priceNow)
           }
         }
       }
@@ -216,7 +216,7 @@ function startWatcher() {
 
 async function startBot() {
   await sendTelegramMessage(
-    "🚀 Binance Telegram bot 2 has started and is watching prices..."
+    "🚀 Bot 2 has started ..."
   )
   startWatcher()
 }
